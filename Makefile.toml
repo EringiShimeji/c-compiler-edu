@@ -1,0 +1,14 @@
+[tasks.clean]
+command = "cargo"
+args = ["clean"]
+
+[tasks.build]
+description = "Runs the rust compiler."
+command = "cargo"
+args = ["build"]
+dependencies = ["clean"]
+
+[tasks.test]
+description = "Conduct tests running test.sh"
+command = "./test.sh"
+dependencies = ["build"]
