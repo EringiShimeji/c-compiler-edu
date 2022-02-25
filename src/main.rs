@@ -1,4 +1,9 @@
-use std::{env, iter::Peekable, process, str::Chars};
+mod lexer;
+
+use lexer::Lexer;
+use std::{env, process};
+
+use crate::lexer::Token;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -12,38 +17,52 @@ fn main() {
     println!(".globl main");
     println!("main:");
 
-    let mut input = args[1].chars().peekable();
-
-    match take_first_num(&mut input) {
-        Some(num) => {
-            println!("  mov rax, {}", num);
+    let mut tokens = match Lexer::new(&args[1]).tokenize() {
+        Ok(tokens) => tokens.into_iter().peekable(),
+        Err(e) => {
+            exit_with_error(e.msg);
+            Vec::new().into_iter().peekable()
         }
-        None => {
-            eprintln!("引数が不正です");
-            process::exit(1);
+    };
+
+    if tokens.len() > 0 {
+        match tokens.next() {
+            Some(Token::Number(num)) => {
+                println!("  mov rax, {}", num);
+            }
+            Some(Token::Plus) => {
+                exit_with_error("予期しないトークン: +");
+            }
+            Some(Token::Minus) => {
+                exit_with_error("予期しないトークン: -");
+            }
+            None => {
+                exit_with_error("引数が不正です");
+            }
         }
     }
 
-    while let Some(op) = input.clone().peek() {
-        match op {
-            '+' | '-' => {
-                input.next();
+    while let Some(token) = tokens.clone().peek() {
+        match token {
+            Token::Plus | Token::Minus => {
+                tokens.next();
 
-                match take_first_num(&mut input) {
-                    Some(num) => {
-                        let op_command = if *op == '+' { "add" } else { "sub" };
+                if let Some(Token::Number(num)) = tokens.next() {
+                    let op = match token {
+                        Token::Plus => "add",
+                        Token::Minus => "sub",
+                        _ => {
+                            panic!("予期しないトークンが読み込まれました")
+                        }
+                    };
 
-                        println!("  {} rax, {}", op_command, num)
-                    }
-                    None => {
-                        eprintln!("項が必要です");
-                        process::exit(1)
-                    }
-                };
+                    println!("  {} rax, {}", op, num);
+                } else {
+                    exit_with_error(format!("数値が必要です"));
+                }
             }
-            c => {
-                eprintln!("予期しない文字です: {}", c);
-                process::exit(1);
+            Token::Number(num) => {
+                exit_with_error(format!("予期しないトークン: {}", num));
             }
         }
     }
@@ -51,24 +70,7 @@ fn main() {
     println!("  ret");
 }
 
-fn take_first_num<'a>(input: &mut Peekable<Chars<'a>>) -> Option<String> {
-    let mut result = String::new();
-
-    while let Some(c) = input.clone().peek() {
-        match c {
-            c if c.is_numeric() => {
-                result.push(*c);
-                input.next();
-            }
-            _ => {
-                if result.len() == 0 {
-                    return None;
-                }
-
-                return Some(result);
-            }
-        }
-    }
-
-    return Some(result);
+fn exit_with_error(msg: impl std::fmt::Display) {
+    eprintln!("{}", msg);
+    process::exit(1);
 }
