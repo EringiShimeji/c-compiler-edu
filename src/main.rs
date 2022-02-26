@@ -20,7 +20,7 @@ fn main() {
     let mut tokens = match Lexer::new(&args[1]).tokenize() {
         Ok(tokens) => tokens.into_iter().peekable(),
         Err(e) => {
-            exit_with_error(e.msg);
+            exit_with_error(e.get_msg(&args[1]));
             Vec::new().into_iter().peekable()
         }
     };
