@@ -37,19 +37,21 @@ impl<'a> Token<'a> {
 }
 
 struct Lexer<'a> {
+    input: &'a String, // 入力プログラム
     chars: Peekable<Chars<'a>>,
     tokens: Peekable<IntoIter<Token<'a>>>,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(s: &'a String) -> Lexer<'a> {
+    fn new(input: &'a String) -> Lexer<'a> {
         Lexer {
-            chars: s.chars().peekable(),
+            input,
+            chars: input.chars().peekable(),
             tokens: vec![].into_iter().peekable(),
         }
     }
 
-    fn tokenize(&mut self) -> Result<Vec<Token<'a>>, String> {
+    fn tokenize(&mut self) -> Result<Vec<Token<'a>>, impl fmt::Display> {
         let mut result: Vec<Token<'a>> = Vec::new();
 
         while let Some(c) = self.chars.clone().peek() {
@@ -79,11 +81,11 @@ impl<'a> Lexer<'a> {
 
                         result.push(token);
                     } else {
-                        return Err("数ではありません".to_string());
+                        return Err("数ではありません");
                     }
                 }
                 _ => {
-                    return Err("トークナイズできません".to_string());
+                    return Err("トークナイズできません");
                 }
             }
         }
@@ -161,6 +163,26 @@ impl<'a> Lexer<'a> {
 
         Err("数ではありません".to_string())
     }
+
+    /// 発生したエラー箇所を報告する
+    fn error_at(&mut self, msg: impl fmt::Display) -> String {
+        // トークナイズ中かトークンの消費中かを判別する
+        let is_tokenizing = self.chars.peek() != None;
+        let input = self.input.clone();
+        // tokensが空なら元のプログラムの最後の位置でエラーを報告する
+        let pos = if is_tokenizing {
+            input.len() - self.chars.clone().count()
+        } else {
+            if let Some(token) = self.tokens.peek() {
+                input.len() - token.chars.clone().count()
+            } else {
+                input.len()
+            }
+        };
+        let msg_with_arrow = format!("{}^ {}", " ".repeat(pos), msg);
+
+        return format!("{}\n{}", input, msg_with_arrow);
+    }
 }
 
 fn main() {
@@ -174,15 +196,15 @@ fn main() {
     // 解析器を初期化
     let mut lexer = Lexer::new(&args[1]);
 
+    // トークナイズしつつエラーがあればプログラムを止める
+    if let Err(msg) = lexer.tokenize() {
+        error(&mut lexer, msg);
+    }
+
     // アセンブリの前半部分を出力
     println!(".intel_syntax noprefix");
     println!(".globl main");
     println!("main:");
-
-    // トークナイズしつつエラーがあればプログラムを止める
-    if let Err(msg) = lexer.tokenize() {
-        error(msg);
-    }
 
     // 式の最初は数でなければならないので、それをチェックして最初のmov命令を出力
     match lexer.expect_number() {
@@ -190,7 +212,7 @@ fn main() {
             println!("  mov rax, {}", num);
         }
         Err(msg) => {
-            error(msg);
+            error(&mut lexer, msg);
         }
     }
 
@@ -202,7 +224,7 @@ fn main() {
                     println!("  add rax, {}", num);
                 }
                 Err(msg) => {
-                    error(msg);
+                    error(&mut lexer, msg);
                 }
             }
 
@@ -210,7 +232,7 @@ fn main() {
         }
 
         if let Err(msg) = lexer.expect(Reserved::Minus) {
-            error(msg);
+            error(&mut lexer, msg);
         };
 
         match lexer.expect_number() {
@@ -218,7 +240,7 @@ fn main() {
                 println!("  sub rax, {}", num);
             }
             Err(msg) => {
-                error(msg);
+                error(&mut lexer, msg);
             }
         }
     }
@@ -296,7 +318,8 @@ fn take_num_str<'a>(input: &mut Peekable<std::str::Chars<'a>>) -> Result<String,
     Ok(result)
 }
 
-fn error(msg: String) {
+fn error<'a>(lexer: &mut Lexer<'a>, msg: impl fmt::Display) {
+    let msg = lexer.error_at(msg);
     eprintln!("{}", msg);
     process::exit(1);
 }
