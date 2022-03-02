@@ -1,19 +1,45 @@
 use std::{env, fmt, iter::Peekable, process, str::Chars, vec::IntoIter};
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Reserved {
+    LeftParen,
+    RightParen,
     Plus,
     Minus,
+    Asterisk,
+    Slash,
 }
 
 impl fmt::Display for Reserved {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self {
+            Reserved::LeftParen => "(",
+            Reserved::RightParen => ")",
             Reserved::Plus => "+",
             Reserved::Minus => "-",
+            Reserved::Asterisk => "*",
+            Reserved::Slash => "/",
         };
 
         write!(f, "{}", s)
+    }
+}
+
+struct ReservedError(char);
+
+impl TryFrom<&char> for Reserved {
+    type Error = ReservedError;
+
+    fn try_from(item: &char) -> Result<Self, Self::Error> {
+        match item {
+            '(' => Ok(Reserved::LeftParen),
+            ')' => Ok(Reserved::RightParen),
+            '+' => Ok(Reserved::Plus),
+            '-' => Ok(Reserved::Minus),
+            '*' => Ok(Reserved::Asterisk),
+            '/' => Ok(Reserved::Slash),
+            _ => Err(ReservedError(*item)),
+        }
     }
 }
 
@@ -59,16 +85,20 @@ impl<'a> Lexer<'a> {
                 c if c.is_whitespace() => {
                     self.chars.next();
                 }
-                '+' | '-' => {
-                    let op = if *c == '+' {
-                        TokenKind::Reserved(Reserved::Plus)
-                    } else {
-                        TokenKind::Reserved(Reserved::Minus)
-                    };
-                    let token = Token::new(op, self.chars.clone());
+                '(' | ')' | '+' | '-' | '*' | '/' => {
+                    let reserved = Reserved::try_from(c);
+                    match reserved {
+                        Ok(reserved) => {
+                            let token =
+                                Token::new(TokenKind::Reserved(reserved), self.chars.clone());
 
-                    result.push(token);
-                    self.chars.next();
+                            result.push(token);
+                            self.chars.next();
+                        }
+                        Err(_) => {
+                            return Err("予期しない文字です");
+                        }
+                    }
                 }
                 c if c.is_numeric() => {
                     let num = match take_num_str(&mut self.chars) {
@@ -114,11 +144,11 @@ impl<'a> Lexer<'a> {
     /// それ以外の場合は偽を返す
     fn consume(&mut self, expect: Reserved) -> bool {
         if let Some(Token {
-            kind: TokenKind::Reserved(op),
+            kind: TokenKind::Reserved(reserved),
             ..
         }) = self.tokens.peek()
         {
-            if *op == expect {
+            if *reserved == expect {
                 self.tokens.next();
 
                 return true;
@@ -132,11 +162,11 @@ impl<'a> Lexer<'a> {
     /// それ以外の場合はエラーを報告する
     fn expect(&mut self, expect: Reserved) -> Result<(), String> {
         if let Some(Token {
-            kind: TokenKind::Reserved(op),
+            kind: TokenKind::Reserved(reserved),
             ..
         }) = self.tokens.peek()
         {
-            if *op == expect {
+            if *reserved == expect {
                 self.tokens.next();
 
                 return Ok(());
@@ -185,6 +215,168 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// 抽象構文木のノードの種類
+enum NodeKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Num(isize),
+}
+
+/// 抽象構文木のノード
+struct Node {
+    kind: NodeKind,         // ノードの型
+    lhs: Option<Box<Node>>, // 左辺
+    rhs: Option<Box<Node>>, // 右辺
+}
+
+impl Node {
+    fn new(kind: NodeKind, lhs: Option<Box<Node>>, rhs: Option<Box<Node>>) -> Node {
+        Node { kind, lhs, rhs }
+    }
+}
+
+struct Parser<'a> {
+    lexer: Lexer<'a>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(lexer: Lexer<'a>) -> Parser<'a> {
+        Parser { lexer }
+    }
+
+    fn expr(&mut self) -> Result<Node, String> {
+        let mut node = match self.mul() {
+            Ok(node) => node,
+            Err(msg) => {
+                return Err(msg);
+            }
+        };
+
+        loop {
+            if self.lexer.consume(Reserved::Plus) {
+                match self.mul() {
+                    Ok(mul) => {
+                        node = Node::new(NodeKind::Add, Some(Box::new(node)), Some(Box::new(mul)))
+                    }
+                    Err(msg) => {
+                        return Err(msg);
+                    }
+                }
+            } else if self.lexer.consume(Reserved::Minus) {
+                match self.mul() {
+                    Ok(mul) => {
+                        node = Node::new(NodeKind::Sub, Some(Box::new(node)), Some(Box::new(mul)))
+                    }
+                    Err(msg) => {
+                        return Err(msg);
+                    }
+                }
+            } else {
+                return Ok(node);
+            }
+        }
+    }
+
+    fn mul(&mut self) -> Result<Node, String> {
+        let mut node = match self.primary() {
+            Ok(node) => node,
+            Err(msg) => {
+                return Err(msg);
+            }
+        };
+
+        loop {
+            if self.lexer.consume(Reserved::Asterisk) {
+                match self.primary() {
+                    Ok(primary) => {
+                        node =
+                            Node::new(NodeKind::Mul, Some(Box::new(node)), Some(Box::new(primary)));
+                    }
+                    Err(msg) => {
+                        return Err(msg);
+                    }
+                }
+            } else if self.lexer.consume(Reserved::Slash) {
+                match self.primary() {
+                    Ok(primary) => {
+                        node =
+                            Node::new(NodeKind::Div, Some(Box::new(node)), Some(Box::new(primary)));
+                    }
+                    Err(msg) => {
+                        return Err(msg);
+                    }
+                }
+            } else {
+                return Ok(node);
+            }
+        }
+    }
+
+    fn primary(&mut self) -> Result<Node, String> {
+        if self.lexer.consume(Reserved::LeftParen) {
+            let node = match self.expr() {
+                Ok(node) => node,
+                Err(msg) => {
+                    return Err(msg);
+                }
+            };
+
+            if let Err(msg) = self.lexer.expect(Reserved::RightParen) {
+                return Err(msg);
+            }
+
+            return Ok(node);
+        }
+
+        if let Ok(num) = self.lexer.expect_number() {
+            let node = Node::new(NodeKind::Num(num), None, None);
+
+            return Ok(node);
+        }
+
+        Err("".to_string())
+    }
+}
+
+fn gen(node: Node) {
+    if let NodeKind::Num(num) = node.kind {
+        println!("  push {}", num);
+        return;
+    }
+
+    if let Some(lhs) = node.lhs {
+        gen(*lhs);
+    };
+
+    if let Some(rhs) = node.rhs {
+        gen(*rhs);
+    };
+
+    println!("  pop rdi");
+    println!("  pop rax");
+
+    match node.kind {
+        NodeKind::Add => {
+            println!("  add rax, rdi");
+        }
+        NodeKind::Sub => {
+            println!("  sub rax, rdi");
+        }
+        NodeKind::Mul => {
+            println!("  imul rax, rdi");
+        }
+        NodeKind::Div => {
+            println!("  cqo");
+            println!("  idiv rdi");
+        }
+        _ => {}
+    }
+
+    println!("  push rax")
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -193,7 +385,7 @@ fn main() {
         process::exit(1);
     }
 
-    // 解析器を初期化
+    // 字句解析器を初期化
     let mut lexer = Lexer::new(&args[1]);
 
     // トークナイズしつつエラーがあればプログラムを止める
@@ -201,50 +393,25 @@ fn main() {
         error(&mut lexer, msg);
     }
 
+    // パーサーを初期化
+    let mut parser = Parser::new(lexer);
+    let node = match parser.expr() {
+        Ok(node) => node,
+        Err(msg) => {
+            error(&mut parser.lexer, msg);
+            return;
+        }
+    };
+
     // アセンブリの前半部分を出力
     println!(".intel_syntax noprefix");
     println!(".globl main");
     println!("main:");
 
-    // 式の最初は数でなければならないので、それをチェックして最初のmov命令を出力
-    match lexer.expect_number() {
-        Ok(num) => {
-            println!("  mov rax, {}", num);
-        }
-        Err(msg) => {
-            error(&mut lexer, msg);
-        }
-    }
+    gen(node);
 
-    // `+ <数>`あるいは`- <数>`というトークンの並びを消費しつつアセンブリを出力
-    while !lexer.at_eof() {
-        if lexer.consume(Reserved::Plus) {
-            match lexer.expect_number() {
-                Ok(num) => {
-                    println!("  add rax, {}", num);
-                }
-                Err(msg) => {
-                    error(&mut lexer, msg);
-                }
-            }
-
-            continue;
-        }
-
-        if let Err(msg) = lexer.expect(Reserved::Minus) {
-            error(&mut lexer, msg);
-        };
-
-        match lexer.expect_number() {
-            Ok(num) => {
-                println!("  sub rax, {}", num);
-            }
-            Err(msg) => {
-                error(&mut lexer, msg);
-            }
-        }
-    }
-
+    // スタックトップに式全体の値が残っているはずなので、RAXにロードして関数からの返り値とする
+    println!("  pop rax");
     println!("  ret");
 }
 
