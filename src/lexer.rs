@@ -8,6 +8,12 @@ pub enum Reserved {
     Minus,
     Asterisk,
     Slash,
+    Eq,
+    Gt,
+    Ge,
+    Le,
+    Lt,
+    Ne,
 }
 
 impl fmt::Display for Reserved {
@@ -19,9 +25,22 @@ impl fmt::Display for Reserved {
             Reserved::Minus => "-",
             Reserved::Asterisk => "*",
             Reserved::Slash => "/",
+            Reserved::Eq => "==",
+            Reserved::Gt => ">",
+            Reserved::Ge => ">=",
+            Reserved::Le => "<=",
+            Reserved::Lt => "<",
+            Reserved::Ne => "!=",
         };
 
         write!(f, "{}", s)
+    }
+}
+
+impl Reserved {
+    /// 記号の長さ
+    pub fn len(&self) -> usize {
+        self.to_string().len()
     }
 }
 
@@ -100,18 +119,44 @@ impl<'a> Lexer<'a> {
                 }
                 '(' | ')' | '+' | '-' | '*' | '/' => {
                     let reserved = Reserved::try_from(c);
+
                     match reserved {
                         Ok(reserved) => {
                             let token =
                                 Token::new(TokenKind::Reserved(reserved), self.chars.clone());
 
-                            result.push(token);
                             self.chars.next();
+                            result.push(token);
                         }
                         Err(_) => {
                             return Err("予期しない文字です");
                         }
                     }
+                }
+                '=' | '!' | '<' | '>' => {
+                    let reserved = if self.start_with("==") {
+                        Reserved::Eq
+                    } else if self.start_with("!=") {
+                        Reserved::Ne
+                    } else if self.start_with("<=") {
+                        Reserved::Le
+                    } else if self.start_with(">=") {
+                        Reserved::Ge
+                    } else if self.start_with("<") {
+                        Reserved::Lt
+                    } else if self.start_with(">") {
+                        Reserved::Gt
+                    } else {
+                        return Err("予期しない文字です");
+                    };
+                    let reserved_len = reserved.len();
+                    let token = Token::new(TokenKind::Reserved(reserved), self.chars.clone());
+
+                    for _ in 0..reserved_len {
+                        self.chars.next();
+                    }
+
+                    result.push(token);
                 }
                 c if c.is_numeric() => {
                     let num = match self.take_num_str() {
@@ -208,6 +253,31 @@ impl<'a> Lexer<'a> {
 
         Ok(result)
     }
+
+    /// 与えられた文字列から始まるかどうかを判定する
+    /// 元のイテレータは読み進めない
+    pub fn start_with(&self, s: &'static str) -> bool {
+        let mut target = self.chars.clone().take(s.len());
+        let mut input = s.chars();
+
+        while let Some(c_target) = target.next() {
+            if let Some(c_input) = input.next() {
+                if c_target != c_input {
+                    return false;
+                }
+            }
+        }
+
+        match input.next() {
+            Some(_) => {
+                return false;
+            }
+            None => {
+                return true;
+            }
+        }
+    }
+
     pub fn at_eof(&mut self) -> bool {
         if let Some(Token {
             kind: TokenKind::EOF,
@@ -300,33 +370,67 @@ mod test {
     use super::Lexer;
 
     #[test]
-    fn take_num_str_test() {
-        let input = "123".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(input, lexer.take_num_str().unwrap());
+    fn take_num_str() {
+        {
+            let input = "123".to_string();
+            let mut lexer = Lexer::new(&input);
 
-        let input = "+456".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(input[1..4], lexer.take_num_str().unwrap());
+            assert_eq!(input, lexer.take_num_str().unwrap());
+        }
 
-        let input = "-789".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(input, lexer.take_num_str().unwrap());
+        {
+            let input = "+456".to_string();
+            let mut lexer = Lexer::new(&input);
 
-        let input = "0".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(input, lexer.take_num_str().unwrap());
+            assert_eq!(input[1..4], lexer.take_num_str().unwrap());
+        }
 
-        let input = "-0".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(input[1..2], lexer.take_num_str().unwrap());
+        {
+            let input = "-789".to_string();
+            let mut lexer = Lexer::new(&input);
 
-        let input = "123a".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(("123".to_string(), 'a'), lexer.take_num_str().unwrap_err());
+            assert_eq!(input, lexer.take_num_str().unwrap());
+        }
 
-        let input = "5+20".to_string();
-        let mut lexer = Lexer::new(&input);
-        assert_eq!(("5".to_string(), '+'), lexer.take_num_str().unwrap_err());
+        {
+            let input = "0".to_string();
+            let mut lexer = Lexer::new(&input);
+
+            assert_eq!(input, lexer.take_num_str().unwrap());
+        }
+
+        {
+            let input = "-0".to_string();
+            let mut lexer = Lexer::new(&input);
+
+            assert_eq!(input[1..2], lexer.take_num_str().unwrap());
+        }
+
+        {
+            let input = "123a".to_string();
+            let mut lexer = Lexer::new(&input);
+
+            assert_eq!(("123".to_string(), 'a'), lexer.take_num_str().unwrap_err());
+        }
+
+        {
+            let input = "5+20".to_string();
+            let mut lexer = Lexer::new(&input);
+
+            assert_eq!(("5".to_string(), '+'), lexer.take_num_str().unwrap_err());
+        }
+    }
+
+    #[test]
+    fn start_with() {
+        let input = "hello".to_string();
+        let lexer = Lexer::new(&input);
+
+        assert_eq!(true, lexer.start_with("hello"));
+        assert_eq!(true, lexer.start_with("h"));
+        assert_eq!(false, lexer.start_with("adsf"));
+        assert_eq!(false, lexer.start_with("ha"));
+        assert_eq!(false, lexer.start_with("ha"));
+        assert_eq!(false, lexer.start_with("hello world"));
     }
 }
