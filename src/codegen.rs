@@ -33,7 +33,29 @@ pub fn gen(node: Node) {
             println!("  cqo");
             println!("  idiv rdi");
         }
-        _ => {}
+        NodeKind::Eq => {
+            println!("  cmp rax, rdi");
+            println!("  sete al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::Ne => {
+            println!("  cmp rax, rdi");
+            println!("  setne al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::Lt => {
+            println!("  cmp rax, rdi");
+            println!("  setl al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::Le => {
+            println!("  cmp rax, rdi");
+            println!("  setle al");
+            println!("  movzb rax, al");
+        }
+        _ => {
+            panic!("予期しないノードです")
+        }
     }
 
     println!("  push rax")

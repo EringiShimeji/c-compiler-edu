@@ -7,6 +7,10 @@ pub enum NodeKind {
     Sub,
     Mul,
     Div,
+    Eq,
+    Lt,
+    Le,
+    Ne,
     Num(isize),
 }
 
@@ -50,6 +54,74 @@ impl<'a> Parser<'a> {
     }
 
     pub fn expr(&mut self) -> Result<Node, String> {
+        self.equality()
+    }
+
+    pub fn equality(&mut self) -> Result<Node, String> {
+        let mut node = match self.relational() {
+            Ok(node) => node,
+            Err(msg) => {
+                return Err(msg);
+            }
+        };
+
+        loop {
+            let kind = if self.lexer.consume(Reserved::Eq) {
+                NodeKind::Eq
+            } else if self.lexer.consume(Reserved::Ne) {
+                NodeKind::Ne
+            } else {
+                return Ok(node);
+            };
+
+            match self.relational() {
+                Ok(relational) => {
+                    node = Node::new(kind, Some(Box::new(node)), Some(Box::new(relational)));
+                }
+                Err(msg) => {
+                    return Err(msg);
+                }
+            }
+        }
+    }
+
+    pub fn relational(&mut self) -> Result<Node, String> {
+        let mut node = match self.add() {
+            Ok(node) => node,
+            Err(msg) => {
+                return Err(msg);
+            }
+        };
+
+        loop {
+            let (kind, is_reverse) = if self.lexer.consume(Reserved::Lt) {
+                (NodeKind::Lt, false)
+            } else if self.lexer.consume(Reserved::Le) {
+                (NodeKind::Le, false)
+            } else if self.lexer.consume(Reserved::Gt) {
+                (NodeKind::Lt, true)
+            } else if self.lexer.consume(Reserved::Ge) {
+                (NodeKind::Le, true)
+            } else {
+                return Ok(node);
+            };
+
+            match self.add() {
+                Ok(add) => {
+                    if is_reverse {
+                        node = Node::new(kind, Some(Box::new(add)), Some(Box::new(node)));
+                    } else {
+                        node = Node::new(kind, Some(Box::new(node)), Some(Box::new(add)));
+                    }
+                }
+                Err(msg) => {
+                    return Err(msg);
+                }
+            }
+        }
+    }
+
+    pub fn add(&mut self) -> Result<Node, String> {
         let mut node = match self.mul() {
             Ok(node) => node,
             Err(msg) => {
@@ -83,7 +155,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn mul(&mut self) -> Result<Node, String> {
-        let mut node = match self.primary() {
+        let mut node = match self.unary() {
             Ok(node) => node,
             Err(msg) => {
                 return Err(msg);
@@ -92,20 +164,20 @@ impl<'a> Parser<'a> {
 
         loop {
             if self.lexer.consume(Reserved::Asterisk) {
-                match self.primary() {
-                    Ok(primary) => {
+                match self.unary() {
+                    Ok(unary) => {
                         node =
-                            Node::new(NodeKind::Mul, Some(Box::new(node)), Some(Box::new(primary)));
+                            Node::new(NodeKind::Mul, Some(Box::new(node)), Some(Box::new(unary)));
                     }
                     Err(msg) => {
                         return Err(msg);
                     }
                 }
             } else if self.lexer.consume(Reserved::Slash) {
-                match self.primary() {
-                    Ok(primary) => {
+                match self.unary() {
+                    Ok(unary) => {
                         node =
-                            Node::new(NodeKind::Div, Some(Box::new(node)), Some(Box::new(primary)));
+                            Node::new(NodeKind::Div, Some(Box::new(node)), Some(Box::new(unary)));
                     }
                     Err(msg) => {
                         return Err(msg);
@@ -115,6 +187,29 @@ impl<'a> Parser<'a> {
                 return Ok(node);
             }
         }
+    }
+
+    pub fn unary(&mut self) -> Result<Node, String> {
+        if self.lexer.consume(Reserved::Plus) {
+            return self.primary();
+        }
+
+        if self.lexer.consume(Reserved::Minus) {
+            match self.primary() {
+                Ok(node) => {
+                    return Ok(Node::new(
+                        NodeKind::Sub,
+                        Some(Box::new(Node::new(NodeKind::Num(0), None, None))),
+                        Some(Box::new(node)),
+                    ));
+                }
+                Err(msg) => {
+                    return Err(msg);
+                }
+            }
+        }
+
+        return self.primary();
     }
 
     pub fn primary(&mut self) -> Result<Node, String> {
@@ -139,6 +234,6 @@ impl<'a> Parser<'a> {
             return Ok(node);
         }
 
-        Err("".to_string())
+        Err("予期しないトークンです".to_string())
     }
 }
