@@ -3,9 +3,9 @@ assert(){
   expected="$1"
   input="$2"
 
-  ./target/debug/9cc "$input" > ./c/tmp.s
-  cc -o ./c/tmp ./c/tmp.s
-  ./c/tmp
+  ./target/debug/9cc "$input" > ./test/tmp.s
+  cc -o ./test/tmp ./test/tmp.s
+  ./test/tmp
   
   actual="$?"
 
@@ -17,7 +17,7 @@ assert(){
   fi
 }
 
-mkdir c
+mkdir test
 
 assert 0 0
 assert 42 42
