@@ -1,4 +1,4 @@
-use std::{env, fmt, iter::Peekable, process, str::Chars, vec::IntoIter};
+use std::{fmt, iter::Peekable, str::Chars, vec::IntoIter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reserved {
